@@ -1,334 +1,264 @@
-// Imports
+// Import
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { API_URL as API } from "../api";
+import { useParams, Link } from "react-router-dom";
+import { API_URL as API, authHeaders, authJsonHeaders } from "../api";
 
-// Create star rating component
+// Star rating component
 function StarDisplay({ rating }) {
-  // Get full number
-  const full = Math.floor(rating);
-  // Check for half stars
-  const half = rating % 1 >= 0.5;
   return (
     <span className="stars">
-      {Array.from({ length: 5 }, (_, i) => {
-        if (i < full) return "★";
-        if (i === full && half) return "⭑";
-        return "☆";
-      }).join("")}
+      {"★".repeat(Math.floor(rating))}
+      {"☆".repeat(5 - Math.floor(rating))}
     </span>
   );
 }
 
-// Create card for showcasing properties
-function PropertyCard({ p }) {
-  return (
-    // Link to rental details using ID
-    <Link to={`/rental/${p.id}`} className="property-card">
-      {/* Card image or thumbnail area */}
-      <div className="card-thumb">
-        {/* Display first two letters of suburb as label */}
-        <span className="card-thumb-label">
-          {p.suburb?.slice(0, 2).toUpperCase()}
-        </span>
-        {/* Property type */}
-        <span className="card-badge">{p.propertyType}</span>
-        {/* Rent */}
-        <span className="card-rent">${p.rent}/wk</span>
-      </div>
-      {/* Main card component */}
-      <div className="card-body">
-        <div className="card-title">{p.title}</div>
-        <div className="card-location">
-          {p.suburb}, {p.state} {p.postcode}
-        </div>
-        <div className="card-meta">
-            {/* Use symbols for property characteristics */}
-          <span>🛏 {p.bedrooms}</span>
-          <span>🚿 {p.bathrooms}</span>
-          <span>🚗 {p.parkingSpaces}</span>
-        </div>
-        {p.numRatings > 0 && (
-          <div className="card-rating">
-            <StarDisplay rating={p.averageRating} />
-            <span>
-              {p.averageRating.toFixed(1)} ({p.numRatings})
-            </span>
-          </div>
-        )}
-      </div>
-    </Link>
-  );
-}
-
-// Main search compoennt
-export default function Search() {
-    // Store results
-  const [results, setResults] = useState([]);
-  const [pagination, setPagination] = useState(null);
+// Rating component
+function RatingWidget({ rentalId }) {
+  // Design
+  const [hovered, setHovered] = useState(0);
+  const [selected, setSelected] = useState(0);
+  const [existing, setExisting] = useState(null);
+  const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(1);
-  const [states, setStates] = useState([]);
-  const [propertyTypes, setPropertyTypes] = useState([]);
-  const [filters, setFilters] = useState({
-    suburb: "",
-    state: "",
-    postcode: "",
-    propertyType: "",
-    minimumBedrooms: "",
-    maximumBedrooms: "",
-    minimumRent: "",
-    maximumRent: "",
-    sortBy: "id",
-    sortOrder: "asc",
-  });
 
-  // Helper function updates filter values
-  const set = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
+  // Auth from local storage
+  const token = localStorage.getItem("token");
 
-  // Get options off API for filtering properties
+  // Load existing user rating
   useEffect(() => {
-    fetch(`${API}/rentals/states`)
-      .then((r) => r.json())
-      .then(setStates)
-      .catch(() => {});
-
-    fetch(`${API}/rentals/property-types`)
-      .then((r) => r.json())
-      .then(setPropertyTypes)
-      .catch(() => {});
-  }, []);
-
-  // Buid query parameters for API search
-  const buildParams = (pg = 1) => {
-    const p = new URLSearchParams();
-    if (filters.suburb) p.set("suburb", filters.suburb);
-    if (filters.state) p.set("state", filters.state);
-    if (filters.postcode) p.set("postcode", filters.postcode);
-    if (filters.propertyType) p.append("propertyTypes", filters.propertyType);
-    if (filters.minimumBedrooms)
-      p.set("minimumBedrooms", filters.minimumBedrooms);
-    if (filters.maximumBedrooms)
-      p.set("maximumBedrooms", filters.maximumBedrooms);
-    if (filters.minimumRent) p.set("minimumRent", filters.minimumRent);
-    if (filters.maximumRent) p.set("maximumRent", filters.maximumRent);
-    
-    // Sorting options
-    if (filters.sortBy) p.set("sortBy", filters.sortBy);
-    if (filters.sortBy && filters.sortOrder)
-      p.set("sortOrder", filters.sortOrder);
-    p.set("page", pg);
-    return p.toString();
-  };
-
-  // Search Function to send request to API and update results
-  const search = (pg = 1) => 
-    setLoading(true);
-
-    // Update current page
-    setPage(pg);
-
-    // Get API search results
-    fetch(`${API}/rentals/search?${buildParams(pg)}`)
-      .then((r) => r.json())
+    // Stop if user not logged in
+    if (!token) return;
+    // Get rating from API
+    fetch(`${API}/ratings/rentals/${rentalId}`, {
+      headers: authHeaders(),
+    })
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        setResults(d.data || []);
-        setPagination(d.pagination);
+        if (d) {
+          setExisting(d);
+          setSelected(d.rating);
+        }
       })
-      .catch(() => setResults([]))
+      .catch(() => {});
+  }, [rentalId, token]);
+
+  // Ask user to sign in if not
+  if (!token)
+    return (
+      <div className="rating-widget">
+        <p>
+          <Link to="/login" style={{ color: "var(--brand)", fontWeight: 500 }}>
+            Sign in
+          </Link>{" "}
+          to rate this property.
+        </p>
+      </div>
+    );
+
+  // Submit new rating to API
+  const submit = () => {
+    if (!selected) return;
+    setLoading(true);
+    setStatus("");
+    // POST request to submit
+    fetch(`${API}/ratings/rentals/${rentalId}`, {
+      method: "POST",
+      headers: authJsonHeaders(),
+      body: JSON.stringify({ rating: selected }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => {
+        setExisting(d);
+        setStatus("Rating saved!");
+      })
+      .catch(() => setStatus("Something went wrong."))
       .finally(() => setLoading(false));
   };
 
-  // Run search
+  // New rating updated page
+  return (
+    <div className="rating-widget">
+      <p>
+        {existing
+          ? `Your rating: updated ${new Date(existing.dateTime).toLocaleDateString()}`
+          : "Rate this property"}
+      </p>
+      <div className="star-picker">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            onMouseEnter={() => setHovered(n)}
+            onMouseLeave={() => setHovered(0)}
+            onClick={() => setSelected(n)}
+            style={{
+              color: n <= (hovered || selected) ? "#f59e0b" : "#d1d5db",
+            }}
+            aria-label={`${n} star`}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+      <button
+        className="btn btn-primary btn-sm"
+        onClick={submit}
+        disabled={!selected || loading}
+      >
+        {loading ? "Saving…" : existing ? "Update rating" : "Submit rating"}
+      </button>
+      {status && (
+        <p
+          style={{
+            marginTop: "0.5rem",
+            fontSize: "0.8rem",
+            color: status.includes("!") ? "#166534" : "#c0152d",
+          }}
+        >
+          {status}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Main rentals page
+export default function RentalPage() {
+  const { id } = useParams();
+  const [rental, setRental] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
   useEffect(() => {
-    search(1);
-  }, []);
+    fetch(`${API}/rentals/${id}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setRental)
+      .catch(() => setError("Property not found."))
+      .finally(() => setLoading(false));
+  }, [id]);
 
-  // Reset filter parameters to default
-  const reset = () => {
-    setFilters({
-      suburb: "",
-      state: "",
-      postcode: "",
-      propertyType: "",
-      minimumBedrooms: "",
-      maximumBedrooms: "",
-      minimumRent: "",
-      maximumRent: "",
-      sortBy: "id",
-      sortOrder: "asc",
-    });
-  };
+  if (loading) return <div className="loading">Loading property…</div>;
+  if (error)
+    return (
+      <div className="empty-state">
+        <strong>{error}</strong>
+      </div>
+    );
+  if (!rental) return null;
 
-  // Return page
+  const amenityList = rental.amenities
+    ? rental.amenities
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean)
+    : [];
+
+  // UI Components
   return (
     <div>
-      <div className="page-header">
-        <h1>Find your next rental</h1>
-        <p>
-          Browsing {pagination ? pagination.total.toLocaleString() : "—"}{" "}
-          properties across Australia
-        </p>
-      </div>
+      <Link to="/search" className="rental-back">
+        ← Back to search
+      </Link>
 
-      <div className="filters">
-        <div className="filter-group">
-          <label>Suburb</label>
-          <input
-            value={filters.suburb}
-            onChange={(e) => set("suburb", e.target.value)}
-            placeholder="e.g. Newtown"
-            onKeyDown={(e) => e.key === "Enter" && search(1)}
-          />
-        </div>
-        <div className="filter-group">
-          <label>State</label>
-          <select
-            value={filters.state}
-            onChange={(e) => set("state", e.target.value)}
-          >
-            <option value="">All states</option>
-            {states.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-        <div className="filter-group">
-          <label>Postcode</label>
-          <input
-            value={filters.postcode}
-            onChange={(e) => set("postcode", e.target.value)}
-            placeholder="e.g. 4000"
-            type="number"
-          />
-        </div>
-        <div className="filter-group">
-          <label>Property type</label>
-          <select
-            value={filters.propertyType}
-            onChange={(e) => set("propertyType", e.target.value)}
-          >
-            <option value="">Any type</option>
-            {propertyTypes.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-        </div>
-        <div className="filter-group">
-          <label>Min beds</label>
-          <input
-            value={filters.minimumBedrooms}
-            onChange={(e) => set("minimumBedrooms", e.target.value)}
-            type="number"
-            min="0"
-            placeholder="0"
-          />
-        </div>
-        <div className="filter-group">
-          <label>Max beds</label>
-          <input
-            value={filters.maximumBedrooms}
-            onChange={(e) => set("maximumBedrooms", e.target.value)}
-            type="number"
-            min="0"
-            placeholder="Any"
-          />
-        </div>
-        <div className="filter-group">
-          <label>Min rent $</label>
-          <input
-            value={filters.minimumRent}
-            onChange={(e) => set("minimumRent", e.target.value)}
-            type="number"
-            min="0"
-            placeholder="0"
-          />
-        </div>
-        <div className="filter-group">
-          <label>Max rent $</label>
-          <input
-            value={filters.maximumRent}
-            onChange={(e) => set("maximumRent", e.target.value)}
-            type="number"
-            min="0"
-            placeholder="Any"
-          />
-        </div>
-        <div className="filter-group">
-          <label>Sort by</label>
-          <select
-            value={filters.sortBy}
-            onChange={(e) => set("sortBy", e.target.value)}
-          >
-            <option value="id">Default</option>
-            <option value="rent">Rent</option>
-            <option value="bedrooms">Bedrooms</option>
-            <option value="averageRating">Rating</option>
-            <option value="suburb">Suburb</option>
-          </select>
-        </div>
-        <div className="filter-group">
-          <label>Order</label>
-          <select
-            value={filters.sortOrder}
-            onChange={(e) => set("sortOrder", e.target.value)}
-          >
-            <option value="asc">Ascending</option>
-            <option value="desc">Descending</option>
-          </select>
-        </div>
-        <div className="filter-actions filter-group">
-          <label>&nbsp;</label>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button className="btn btn-primary" onClick={() => search(1)}>
-              Search
-            </button>
-            <button className="btn btn-ghost" onClick={reset}>
-              Reset
-            </button>
+      <div className="rental-hero">
+        <div>
+          <h1>{rental.title}</h1>
+          <div className="rental-hero-sub">
+            {rental.streetAddress}, {rental.suburb} {rental.postcode},{" "}
+            {rental.state}
           </div>
-        </div>
-      </div>
-
-      {loading && <div className="loading">Loading properties…</div>}
-
-      {!loading && results.length === 0 && (
-        <div className="empty-state">
-          <strong>No properties found</strong>
-          <p>Try adjusting your filters</p>
-        </div>
-      )}
-
-      {!loading && results.length > 0 && (
-        <>
-          <div className="property-grid">
-            {results.map((p) => (
-              <PropertyCard key={p.id} p={p} />
-            ))}
-          </div>
-          {pagination && (
-            <div className="pagination">
-              <button
-                className="page-btn"
-                disabled={!pagination.prevPage}
-                onClick={() => search(page - 1)}
-              >
-                ← Prev
-              </button>
-              <span className="page-info">
-                Page {pagination.currentPage} of {pagination.lastPage}
+          {rental.numRatings > 0 && (
+            <div
+              style={{
+                marginTop: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                fontSize: "0.875rem",
+              }}
+            >
+              <span style={{ color: "#f59e0b" }}>
+                {"★".repeat(Math.round(rental.averageRating))}
               </span>
-              <button
-                className="page-btn"
-                disabled={!pagination.nextPage}
-                onClick={() => search(page + 1)}
-              >
-                Next →
-              </button>
+              <span style={{ color: "rgba(255,255,255,0.7)" }}>
+                {rental.averageRating.toFixed(1)} from {rental.numRatings}{" "}
+                review{rental.numRatings !== 1 ? "s" : ""}
+              </span>
             </div>
           )}
-        </>
-      )}
+        </div>
+        <div className="rental-price">
+          ${rental.rent}
+          <span style={{ fontSize: "0.75rem", fontWeight: 400 }}>/wk</span>
+        </div>
+      </div>
+
+      <div className="rental-grid">
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}
+        >
+          <div className="card-panel">
+            <h3>Description</h3>
+            <div
+              className="description"
+              dangerouslySetInnerHTML={{ __html: rental.description }}
+            />
+          </div>
+          {amenityList.length > 0 && (
+            <div className="card-panel">
+              <h3>Amenities</h3>
+              <div className="amenity-tags">
+                {amenityList.map((a, i) => (
+                  <span key={i} className="amenity-tag">
+                    {a}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}
+        >
+          <div className="card-panel">
+            <h3>Property details</h3>
+            <div className="detail-row">
+              <span className="label">Type</span>
+              <span className="val" style={{ textTransform: "capitalize" }}>
+                {rental.propertyType}
+              </span>
+            </div>
+            <div className="detail-row">
+              <span className="label">Bedrooms</span>
+              <span className="val">{rental.bedrooms}</span>
+            </div>
+            <div className="detail-row">
+              <span className="label">Bathrooms</span>
+              <span className="val">{rental.bathrooms}</span>
+            </div>
+            <div className="detail-row">
+              <span className="label">Parking</span>
+              <span className="val">{rental.parkingSpaces}</span>
+            </div>
+            <div className="detail-row">
+              <span className="label">Agency</span>
+              <span
+                className="val"
+                style={{
+                  textAlign: "right",
+                  maxWidth: "55%",
+                  fontSize: "0.8rem",
+                }}
+              >
+                {rental.agencyName}
+              </span>
+            </div>
+
+            <RatingWidget rentalId={id} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
