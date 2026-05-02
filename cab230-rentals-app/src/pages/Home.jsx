@@ -25,7 +25,7 @@ const steps = [
   },
 ];
 
-export default function HomePage() {
+export default function HomeP() {
   const loggedIn = !!localStorage.getItem("token");
 
   // Home page components

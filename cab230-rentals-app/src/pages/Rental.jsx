@@ -123,7 +123,7 @@ function RatingWidget({ rentalId }) {
 }
 
 // Main rentals page
-export default function RentalPage() {
+export default function Rental() {
   const { id } = useParams();
   const [rental, setRental] = useState(null);
   const [loading, setLoading] = useState(true);

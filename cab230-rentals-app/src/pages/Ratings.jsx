@@ -14,7 +14,7 @@ function StarDisplay({ n }) {
 }
 
 // Main ratings page
-export default function RatingsPage() {
+export default function Ratings() {
   const [ratings, setRatings] = useState([]);
   const [pagination, setPagination] = useState(null);
   const [loading, setLoading] = useState(true);
